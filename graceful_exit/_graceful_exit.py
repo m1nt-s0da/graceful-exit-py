@@ -1,5 +1,5 @@
 import signal
-from typing import Protocol, Literal
+from typing import Protocol, Literal, overload
 import threading
 
 __all__ = ["GracefulExit", "SignalHandler"]
@@ -9,29 +9,31 @@ class SignalHandler(Protocol):
     def __call__(self, signum: int, frame) -> None | Literal["persist"]: ...
 
 
+def _default_user_handler(signum: int, frame) -> None:
+    from logging import getLogger
+
+    logger = getLogger("graceful_exit")
+    logger.info(f"Received signal {signum}, preparing to exit gracefully.")
+    logger.info("Send the signal again to force immediate termination.")
+
+
 class GracefulExit:
     def __init__(
         self,
         *,
         sigint=True,
         sigterm=False,
-        sigint_handler: SignalHandler | None = None,
-        sigterm_handler: SignalHandler | None = None,
+        handler: SignalHandler = _default_user_handler,
     ):
-        if sigint is False and sigint_handler is not None:
-            raise ValueError("SIGINT handler provided but SIGINT handling is disabled.")
-        if sigterm is False and sigterm_handler is not None:
-            raise ValueError(
-                "SIGTERM handler provided but SIGTERM handling is disabled."
-            )
+        if not sigint and not sigterm:
+            raise ValueError("At least one of sigint or sigterm must be True.")
 
         self._sigint = sigint
         self._sigterm = sigterm
         self._old_sigint_handler = None
         self._old_sigterm_handler = None
         self._signals: list[int] = []
-        self._sigint_handler = sigint_handler
-        self._sigterm_handler = sigterm_handler
+        self._user_handler = handler
         self._signals_lock = threading.Lock()
         self._sigint_handler_set = False
         self._sigterm_handler_set = False
@@ -54,10 +56,10 @@ class GracefulExit:
 
         should_persist = False
         try:
-            if signum == signal.SIGINT and self._sigint_handler is not None:
-                should_persist = self._sigint_handler(signum, frame) == "persist"
-            if signum == signal.SIGTERM and self._sigterm_handler is not None:
-                should_persist = self._sigterm_handler(signum, frame) == "persist"
+            if signum == signal.SIGINT and self._user_handler is not None:
+                should_persist = self._user_handler(signum, frame) == "persist"
+            if signum == signal.SIGTERM and self._user_handler is not None:
+                should_persist = self._user_handler(signum, frame) == "persist"
         finally:
             if not should_persist:
                 self._remove_handler(signum)

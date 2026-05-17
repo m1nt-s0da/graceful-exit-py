@@ -1,5 +1,11 @@
 import signal
+import sys
+from pathlib import Path
+
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from graceful_exit import GracefulExit
 
 
@@ -24,7 +30,7 @@ def test_first_sigint_sets_flag_and_second_sigint_raises_keyboard_interrupt():
         should_stop = True
 
     try:
-        with GracefulExit(sigint=True, sigint_handler=on_sigint) as graceful_exit:
+        with GracefulExit(sigint=True, handler=on_sigint) as graceful_exit:
             graceful_exit._signal_handler(signal.SIGINT, None)
 
             assert should_stop is True
@@ -45,7 +51,7 @@ def test_persist_keeps_custom_handler_installed_for_following_sigint():
         handled += 1
         return "persist"
 
-    with GracefulExit(sigint=True, sigint_handler=on_sigint) as graceful_exit:
+    with GracefulExit(sigint=True, handler=on_sigint) as graceful_exit:
         graceful_exit._signal_handler(signal.SIGINT, None)
         graceful_exit._signal_handler(signal.SIGINT, None)
 
@@ -62,7 +68,7 @@ def test_handler_exception_still_restores_previous_sigint_handler():
         raise RuntimeError("save failed")
 
     try:
-        with GracefulExit(sigint=True, sigint_handler=on_sigint) as graceful_exit:
+        with GracefulExit(sigint=True, handler=on_sigint) as graceful_exit:
             with pytest.raises(RuntimeError, match="save failed"):
                 graceful_exit._signal_handler(signal.SIGINT, None)
 
@@ -70,3 +76,30 @@ def test_handler_exception_still_restores_previous_sigint_handler():
             assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     finally:
         signal.signal(signal.SIGINT, original_sigint_handler)
+
+
+def test_shared_handler_handles_sigterm_once_then_restores_previous_handler():
+    received = []
+    original_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def on_signal(signum, frame):
+        received.append(signum)
+
+    try:
+        with GracefulExit(
+            sigint=False, sigterm=True, handler=on_signal
+        ) as graceful_exit:
+            graceful_exit._signal_handler(signal.SIGTERM, None)
+
+            assert received == [signal.SIGTERM]
+            assert graceful_exit.signals == [signal.SIGTERM]
+            assert signal.getsignal(signal.SIGTERM) is original_sigterm_handler
+    finally:
+        signal.signal(signal.SIGTERM, original_sigterm_handler)
+
+
+def test_init_rejects_when_no_signal_is_enabled():
+    with pytest.raises(
+        ValueError, match="At least one of sigint or sigterm must be True"
+    ):
+        GracefulExit(sigint=False, sigterm=False)
