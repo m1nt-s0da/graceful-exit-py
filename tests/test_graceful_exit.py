@@ -103,3 +103,30 @@ def test_init_rejects_when_no_signal_is_enabled():
         ValueError, match="At least one of sigint or sigterm must be True"
     ):
         GracefulExit(sigint=False, sigterm=False)
+
+
+def test_first_sigint_without_custom_handler_marks_signal_and_second_raises():
+    original_sigint_handler = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+
+    try:
+        with GracefulExit(sigint=True) as graceful_exit:
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+
+            assert graceful_exit.signals == [signal.SIGINT]
+            assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+            with pytest.raises(KeyboardInterrupt):
+                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+    finally:
+        signal.signal(signal.SIGINT, original_sigint_handler)
+
+
+def test_instance_cannot_be_reused_after_stop():
+    graceful_exit = GracefulExit(sigint=True)
+
+    graceful_exit.start()
+    graceful_exit.stop()
+
+    with pytest.raises(RuntimeError, match="cannot be reused"):
+        graceful_exit.start()

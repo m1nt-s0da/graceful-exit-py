@@ -1,5 +1,5 @@
 import signal
-from typing import Protocol, Literal, overload
+from typing import Protocol, Literal
 import threading
 
 __all__ = ["GracefulExit", "SignalHandler"]
@@ -37,6 +37,7 @@ class GracefulExit:
         self._signals_lock = threading.Lock()
         self._sigint_handler_set = False
         self._sigterm_handler_set = False
+        self._used = False
 
     def __enter__(self):
         self.start()
@@ -67,6 +68,8 @@ class GracefulExit:
     def start(self):
         if threading.current_thread() is not threading.main_thread():
             raise RuntimeError("Signal handlers can only be set in the main thread.")
+        if self._used:
+            raise RuntimeError("GracefulExit instances cannot be reused.")
 
         installed_sigint = False
         installed_sigterm = False
@@ -91,6 +94,7 @@ class GracefulExit:
                 )
                 self._sigterm_handler_set = True
                 installed_sigterm = True
+            self._used = True
         except Exception:
             if installed_sigterm:
                 self._remove_handler(signal.SIGTERM)
